@@ -3,32 +3,43 @@ using System.Net;
 using System.Net.Sockets;
 using System.Management;
 using Microsoft.Win32;
+using System.Net.NetworkInformation;
 public class HostInfoChecker
 {
 
-        // Function to get the Local IP Address of the host
-        public static string GetLocalIPAddress()
-        {
-            try
-            {
-                var host = Dns.GetHostEntry(Dns.GetHostName());
-                foreach (var ip in host.AddressList)
-                {
-                    if (ip.AddressFamily == AddressFamily.InterNetwork)
-                    {
-                        return ip.ToString();
-                    }
-                }
-                throw new Exception("No IPv4 address found.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error: {ex.Message}");
-                return "Unknown";
-            }
-        }
+     // Function to get the Local IP Address of the host
+     public static string GetLocalIPAddress()
+     {
+          try
+          {
+               var networkInterfaces = NetworkInterface.GetAllNetworkInterfaces()
+                   .Where(n => n.OperationalStatus == OperationalStatus.Up &&
+                               n.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                               n.NetworkInterfaceType != NetworkInterfaceType.Tunnel);
 
-        public static string GetOSAutoUpdateSetting()
+               foreach (var netInterface in networkInterfaces)
+               {
+                    var ipProps = netInterface.GetIPProperties();
+                    foreach (var ip in ipProps.UnicastAddresses)
+                    {
+                         if (ip.Address.AddressFamily == AddressFamily.InterNetwork &&
+                             !ip.Address.ToString().StartsWith("169.254")) // Exclude APIPA
+                         {
+                              return ip.Address.ToString();
+                         }
+                    }
+               }
+
+               throw new Exception("No valid IPv4 address found.");
+          }
+          catch (Exception ex)
+          {
+               Console.WriteLine($"Error: {ex.Message}");
+               return "Unknown";
+          }
+     }
+
+     public static string GetOSAutoUpdateSetting()
         {
           string autoUpdateSetting;
 
