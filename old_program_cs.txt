@@ -1,0 +1,162 @@
+using System;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.ServiceProcess;
+using WindowsAgentService.Helpers;
+
+namespace WindowsAgent
+{
+     public class AgentService : ServiceBase
+     {
+          private Timer timer;
+          private const int TimerIntervalInMinutes = 3; // Minutes
+
+          public AgentService()
+          {
+               this.ServiceName = "WindowsAgentService";
+          }
+
+          protected override void OnStart(string[] args)
+          {
+               Logger.LogInfo("Starting C# Agent Service...");
+               timer = new Timer(async _ => await RunAgent(), null, TimeSpan.Zero, TimeSpan.FromMinutes(TimerIntervalInMinutes));
+          }
+
+          protected override void OnStop()
+          {
+               timer?.Dispose();
+               Logger.LogInfo("C# Agent Service stopped.");
+          }
+
+          private async Task RunAgent()
+          {
+               try
+               {
+                    Logger.LogInfo("Collecting system data...");
+                    var systemData = await Program.GetSystemData();
+                    Program.GetBandwidthTxRx(systemData);
+
+                    string jsonPayload = JsonSerializer.Serialize(systemData, new JsonSerializerOptions { WriteIndented = true });
+                    Logger.LogInfo("Data collected:\n" + jsonPayload);
+
+                    string apiEndpoint = "http://3.137.190.245/api/data/";
+                    // Uncomment below to enable data sending
+                    await Program.SendDataToAPI(apiEndpoint, jsonPayload);
+                    Logger.LogInfo("Data successfully sent to the API.");
+               }
+               catch (Exception ex)
+               {
+                    Logger.LogError("An error occurred while running the agent.", ex);
+               }
+          }
+
+          public static void Main(string[] args)
+          {
+               ServiceBase.Run(new AgentService());
+          }
+     }
+
+     public static class Program
+     {
+          public static async Task<SystemData> GetSystemData()
+          {
+               // Get system data asynchronously
+               return await Task.FromResult(new SystemData
+               {
+                    Hostname = Environment.MachineName,
+                    IpAddress = HostInfoChecker.GetLocalIPAddress(),
+                    BwRx = "0",
+                    BwTx = "0",
+                    FreeRam = HostPerfChecker.GetFreeRam(),
+                    TotalMemory = HostPerfChecker.GetTotalMemory(),
+                    FreeDiskSpace = HostPerfChecker.GetFreeDriveSpace("C"),
+                    Uptime = HostPerfChecker.GetSystemUptime(),
+                    OSVersion = Environment.OSVersion.ToString(),
+                    CpuUsage = HostPerfChecker.GetCpuUsage(),
+                    AvName = AntivirusChecker.GetActiveAntivirusName(),
+                    AvSignatureStatus = AntivirusChecker.GetSignatureStatus(),
+                    DriveEncryption = DriveEncryptionChecker.GetDriveEncryption(),
+                    DriveEncryptionStatus = DriveEncryptionChecker.GetDriveEncryptionStatus(),
+                    FirewallName = FirewallChecker.GetFirewallName(),
+                    FirewallState = FirewallChecker.GetFirewallState(),
+                    LoggedOnAsAdmin = UserSessionChecker.GetLoggedInAdminUsers(),
+                    LoggedOnUser = UserSessionChecker.GetLoggedInUsers(),
+                    OsAutoUpdateSetting = HostInfoChecker.GetOSAutoUpdateSetting(),
+                    OsVersionEdition = HostInfoChecker.GetOSVersionAndEdition(),
+                    PasswordComplexity = PasswordPolicyChecker.GetPasswordComplexityRequirements(),
+                    PasswordMaxAge = PasswordPolicyChecker.GetMaximumPasswordAge(),
+                    PasswordMinLength = PasswordPolicyChecker.GetMinimumPasswordLength(),
+                    RdpStatus = RdpChecker.GetRdpStatus(),
+                    ScreenLockTimeout = ScreenLockChecker.GetScreenLockTimeout(),
+                    WifiSecurity = WiFiInfo.GetWiFiSSID(),
+                    WifiSsid = WiFiInfo.GetWiFiSecurityType(),
+                    Timestamp = DateTime.UtcNow
+               });
+          }
+
+          public static void GetBandwidthTxRx(SystemData systemData)
+          {
+               // Get the network bandwidth data and update systemData object
+               var usage = HostPerfChecker.GetBandwidthUsage();
+               if (usage == null)
+               {
+                    Logger.LogInfo("No valid network usage data found.");
+                    return;
+               }
+
+               systemData.BwRx = usage.Value.BytesReceived.ToString();
+               systemData.BwTx = usage.Value.BytesSent.ToString();
+          }
+
+          public static async Task SendDataToAPI(string url, string jsonPayload)
+          {
+               using (var client = new HttpClient())
+               {
+                    HttpContent content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+                    HttpResponseMessage response = await client.PostAsync(url, content);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                         throw new Exception($"Failed to send data. Status Code: {response.StatusCode}");
+                    }
+               }
+          }
+     }
+
+     public class SystemData
+     {
+          public string Hostname { get; set; }
+          public string IpAddress { get; set; }
+          public string OSVersion { get; set; }
+          public string Organization { get; set; }
+          public string BwRx { get; set; }
+          public string BwTx { get; set; }
+          public string CpuUsage { get; set; }
+          public string FreeDiskSpace { get; set; }
+          public string FreeRam { get; set; }
+          public string TotalMemory { get; set; }
+          public string Uptime { get; set; }
+          public string Alert { get; set; }
+          public string AvName { get; set; }
+          public string AvSignatureStatus { get; set; }
+          public string DriveEncryption { get; set; }
+          public string DriveEncryptionStatus { get; set; }
+          public string FirewallName { get; set; }
+          public string FirewallState { get; set; }
+          public string LoggedOnAsAdmin { get; set; }
+          public string LoggedOnUser { get; set; }
+          public string OsAutoUpdateSetting { get; set; }
+          public string OsVersionEdition { get; set; }
+          public string PasswordComplexity { get; set; }
+          public string PasswordMaxAge { get; set; }
+          public string PasswordMinLength { get; set; }
+          public string RdpStatus { get; set; }
+          public string ScreenLockTimeout { get; set; }
+          public string WifiSecurity { get; set; }
+          public string WifiSsid { get; set; }
+          public DateTime Timestamp { get; set; }
+     }
+}
